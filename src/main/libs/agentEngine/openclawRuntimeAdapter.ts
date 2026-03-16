@@ -180,7 +180,6 @@ const stripQQBotSystemPrompt = (text: string): string => {
   const sepIdx = text.indexOf(QQBOT_KNOWN_SEPARATOR);
   if (sepIdx !== -1) {
     const stripped = text.slice(sepIdx + QQBOT_KNOWN_SEPARATOR.length).trim();
-    console.log('[Debug:stripQQBotSystemPrompt] known separator hit, before:', text.length, 'after:', stripped.length);
     return stripped || text;
   }
 
@@ -202,11 +201,9 @@ const stripQQBotSystemPrompt = (text: string): string => {
     if (/^\d+\.\s/.test(seg) || /^⚠/.test(seg) || /^【/.test(seg) || seg.startsWith('- ')) continue;
     // This segment looks like user input.
     const stripped = segments.slice(i).join('\n\n').trim();
-    console.log('[Debug:stripQQBotSystemPrompt] preamble-based strip, before:', text.length, 'after:', stripped.length, 'preview:', stripped.slice(0, 80));
     return stripped || text;
   }
 
-  console.log('[Debug:stripQQBotSystemPrompt] no user input found after preamble, returning original');
   return text;
 };
 
@@ -543,6 +540,17 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
   private gatewayStoppingIntentionally = false;
   private static readonly GATEWAY_RECONNECT_MAX_ATTEMPTS = 10;
   private static readonly GATEWAY_RECONNECT_DELAYS = [2_000, 5_000, 10_000, 15_000, 30_000]; // ms
+
+  /** Gateway tick heartbeat watchdog state */
+  private lastTickTimestamp = 0;
+  private tickWatchdogTimer: ReturnType<typeof setInterval> | null = null;
+  private static readonly TICK_WATCHDOG_INTERVAL_MS = 60_000; // check every 60s
+  private static readonly TICK_TIMEOUT_MS = 90_000; // 3 tick cycles (30s each) without response → dead
+
+  /** Throttle state for messageUpdate IPC emissions during streaming */
+  private lastMessageUpdateEmitTime: Map<string, number> = new Map();
+  private pendingMessageUpdateTimer: Map<string, ReturnType<typeof setTimeout>> = new Map();
+  private static readonly MESSAGE_UPDATE_THROTTLE_MS = 100;
 
   constructor(store: CoworkStore, engineManager: OpenClawEngineManager) {
     super();
@@ -1172,6 +1180,8 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
       scopes: ['operator.admin'],
       onHelloOk: () => {
         settleResolve();
+        this.lastTickTimestamp = Date.now();
+        this.startTickWatchdog();
       },
       onConnectError: (error: Error) => {
         settleReject(error);
@@ -1221,6 +1231,7 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
     this.gatewayStoppingIntentionally = true;
     this.stopChannelPolling();
     this.cancelGatewayReconnect();
+    this.stopTickWatchdog();
     try {
       this.gatewayClient?.stop();
     } catch (error) {
@@ -1233,6 +1244,13 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
     this.channelSessionSync?.clearCache();
     this.knownChannelSessionIds.clear();
     this.browserPrewarmAttempted = false;
+    this.lastTickTimestamp = 0;
+    // Clear messageUpdate throttle state
+    for (const timer of this.pendingMessageUpdateTimer.values()) {
+      clearTimeout(timer);
+    }
+    this.pendingMessageUpdateTimer.clear();
+    this.lastMessageUpdateEmitTime.clear();
     this.gatewayStoppingIntentionally = false;
   }
 
@@ -1240,6 +1258,83 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
     if (this.gatewayReconnectTimer) {
       clearTimeout(this.gatewayReconnectTimer);
       this.gatewayReconnectTimer = null;
+    }
+  }
+
+  /**
+   * Throttled emit for messageUpdate during streaming.
+   * OpenClaw sends full-replacement deltas, so intermediate updates can be safely skipped.
+   * Uses leading + trailing pattern: emit immediately if enough time has passed,
+   * otherwise schedule a trailing emit to deliver the latest content.
+   */
+  private throttledEmitMessageUpdate(sessionId: string, messageId: string, content: string): void {
+    const now = Date.now();
+    const lastEmit = this.lastMessageUpdateEmitTime.get(messageId) ?? 0;
+    const elapsed = now - lastEmit;
+
+    if (elapsed >= OpenClawRuntimeAdapter.MESSAGE_UPDATE_THROTTLE_MS) {
+      this.clearPendingMessageUpdate(messageId);
+      this.lastMessageUpdateEmitTime.set(messageId, now);
+      this.emit('messageUpdate', sessionId, messageId, content);
+      return;
+    }
+
+    // Schedule a trailing emit to ensure the latest content is delivered
+    this.clearPendingMessageUpdate(messageId);
+    this.pendingMessageUpdateTimer.set(messageId, setTimeout(() => {
+      this.pendingMessageUpdateTimer.delete(messageId);
+      this.lastMessageUpdateEmitTime.set(messageId, Date.now());
+      this.emit('messageUpdate', sessionId, messageId, content);
+    }, OpenClawRuntimeAdapter.MESSAGE_UPDATE_THROTTLE_MS - elapsed));
+  }
+
+  private clearPendingMessageUpdate(messageId: string): void {
+    const timer = this.pendingMessageUpdateTimer.get(messageId);
+    if (timer) {
+      clearTimeout(timer);
+      this.pendingMessageUpdateTimer.delete(messageId);
+    }
+  }
+
+  private startTickWatchdog(): void {
+    this.stopTickWatchdog();
+    console.log('[TickWatchdog] started');
+    this.tickWatchdogTimer = setInterval(() => {
+      this.checkTickHealth();
+    }, OpenClawRuntimeAdapter.TICK_WATCHDOG_INTERVAL_MS);
+  }
+
+  private stopTickWatchdog(): void {
+    if (this.tickWatchdogTimer) {
+      clearInterval(this.tickWatchdogTimer);
+      this.tickWatchdogTimer = null;
+    }
+  }
+
+  private checkTickHealth(): void {
+    if (this.lastTickTimestamp <= 0) return;
+    const elapsed = Date.now() - this.lastTickTimestamp;
+    if (elapsed <= OpenClawRuntimeAdapter.TICK_TIMEOUT_MS) return;
+
+    console.warn(`[TickWatchdog] no tick received for ${Math.round(elapsed / 1000)}s (threshold: ${OpenClawRuntimeAdapter.TICK_TIMEOUT_MS / 1000}s) — connection is likely dead, triggering reconnect`);
+    this.cancelGatewayReconnect();
+    this.stopGatewayClient();
+    this.gatewayReconnectAttempt = 0;
+    this.scheduleGatewayReconnect();
+  }
+
+  /**
+   * Called when the system resumes from sleep/suspend.
+   * Resets the reconnect counter and triggers an immediate reconnect or health check.
+   */
+  onSystemResume(): void {
+    console.log('[GatewayReconnect] system resumed from sleep');
+    this.cancelGatewayReconnect();
+    this.gatewayReconnectAttempt = 0;
+    if (!this.gatewayClient) {
+      void this.attemptGatewayReconnect();
+    } else {
+      this.checkTickHealth();
     }
   }
 
@@ -1411,7 +1506,12 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
   }
 
   private handleGatewayEvent(event: GatewayEventFrame): void {
-    console.log('[Debug:handleGatewayEvent] event:', event.event, 'seq:', event.seq);
+
+    if (event.event === 'tick') {
+      this.lastTickTimestamp = Date.now();
+      return;
+    }
+
     if (event.event === 'chat') {
       this.handleChatEvent(event.payload, event.seq);
       return;
@@ -1438,12 +1538,10 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
     const runId = typeof agentPayload.runId === 'string' ? agentPayload.runId.trim() : '';
     const sessionKey = typeof agentPayload.sessionKey === 'string' ? agentPayload.sessionKey.trim() : '';
     const stream = typeof agentPayload.stream === 'string' ? agentPayload.stream : '';
-    console.log('[Debug:handleAgentEvent] entry — sessionKey:', sessionKey, 'runId:', runId, 'stream:', stream, 'seq:', seq);
 
     const sessionIdByRunId = runId ? this.sessionIdByRunId.get(runId) : undefined;
     const sessionIdBySessionKey = sessionKey ? this.resolveSessionIdBySessionKey(sessionKey) ?? undefined : undefined;
     let sessionId = sessionIdByRunId ?? sessionIdBySessionKey;
-    console.log('[Debug:handleAgentEvent] lookup — byRunId:', sessionIdByRunId, 'bySessionKey:', sessionIdBySessionKey, 'resolved:', sessionId);
 
     // Re-create ActiveTurn for channel session follow-up turns
     if (sessionId && !this.activeTurns.has(sessionId) && sessionKey) {
@@ -1519,6 +1617,12 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
       this.lastAgentSeqByRunId.set(runId, seq);
     }
 
+    // Fast-path: skip assistant-stream events — they carry the same text as
+    // chat deltas and dispatchAgentEvent() has no handler for stream=assistant.
+    if (stream === 'assistant') {
+      return;
+    }
+
     this.dispatchAgentEvent(sessionId, turn, {
       ...agentPayload,
       ...(typeof seq === 'number' && Number.isFinite(seq) ? { seq } : {}),
@@ -1528,7 +1632,6 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
   private dispatchAgentEvent(sessionId: string, turn: ActiveTurn, agentPayload: AgentEventPayload): void {
     const stream = typeof agentPayload.stream === 'string' ? agentPayload.stream.trim() : '';
     const hasToolShape = isRecord(agentPayload.data) && typeof agentPayload.data.toolCallId === 'string';
-    console.log('[Debug:dispatchAgentEvent] sessionId:', sessionId, 'stream:', stream, 'hasToolShape:', hasToolShape);
     if (stream === 'tool' || stream === 'tools' || (!stream && hasToolShape)) {
       if (Array.isArray(agentPayload.data)) {
         for (const entry of agentPayload.data) {
@@ -1828,14 +1931,12 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
 
     const chatRunId = typeof chatPayload.runId === 'string' ? chatPayload.runId.trim() : '';
     const chatSessionKey = typeof chatPayload.sessionKey === 'string' ? chatPayload.sessionKey.trim() : '';
-    console.log('[Debug:handleChatEvent] entry — state:', state, 'sessionKey:', chatSessionKey, 'runId:', chatRunId, 'seq:', seq);
 
     const sessionId = this.resolveSessionIdFromChatPayload(chatPayload);
     if (!sessionId) {
       console.log('[Debug:handleChatEvent] no sessionId resolved, dropping event');
       return;
     }
-    console.log('[Debug:handleChatEvent] resolved sessionId:', sessionId);
 
     const turn = this.activeTurns.get(sessionId);
     if (!turn) {
@@ -2046,7 +2147,7 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
         },
       });
       turn.currentAssistantSegmentText = segmentText;
-      this.emit('messageUpdate', sessionId, turn.assistantMessageId, segmentText);
+      this.throttledEmitMessageUpdate(sessionId, turn.assistantMessageId, segmentText);
     }
   }
 
@@ -2908,6 +3009,11 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
   private cleanupSessionTurn(sessionId: string): void {
     const turn = this.activeTurns.get(sessionId);
     if (turn) {
+      // Cancel any pending throttled messageUpdate timer for this turn
+      if (turn.assistantMessageId) {
+        this.clearPendingMessageUpdate(turn.assistantMessageId);
+        this.lastMessageUpdateEmitTime.delete(turn.assistantMessageId);
+      }
       turn.knownRunIds.forEach((knownRunId) => {
         this.sessionIdByRunId.delete(knownRunId);
         this.pendingAgentEventsByRunId.delete(knownRunId);

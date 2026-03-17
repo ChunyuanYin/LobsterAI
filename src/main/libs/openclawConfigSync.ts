@@ -42,6 +42,10 @@ const MANAGED_OWNER_ALLOW_FROM = [
   // Prefixing with `webchat:` does not round-trip through owner resolution,
   // so owner-only tools like `cron` never become available.
   'gateway-client',
+  // Native IM channel senders use their platform user ID (e.g. telegram:xxx),
+  // which would not match 'gateway-client'. Use wildcard so all senders that
+  // pass the per-channel allowFrom gate are also recognised as owners.
+  '*',
 ];
 
 const MANAGED_TOOL_DENY = ['web_search'] as const;
@@ -253,21 +257,20 @@ const normalizeMoonshotBaseUrl = (rawBaseUrl: string): string => {
 };
 
 /**
- * Strip well-known API endpoint suffixes from a base URL so that the
+ * Strip the `/chat/completions` endpoint suffix from a base URL so that the
  * OpenClaw gateway can append its own path without duplication.
  *
+ * Aligned with the detection logic in `buildOpenAIChatCompletionsURL`
+ * (coworkFormatTransform.ts) which returns the URL as-is when it already
+ * ends with `/chat/completions`.
+ *
  * e.g. "https://gw.example.com/v1/chat/completions" → "https://gw.example.com/v1"
- *      "https://gw.example.com/v1/messages"          → "https://gw.example.com/v1"
  *      "https://gw.example.com/v1"                   → "https://gw.example.com/v1"  (unchanged)
  */
-const stripEndpointSuffix = (rawBaseUrl: string): string => {
-  let normalized = rawBaseUrl.trim().replace(/\/+$/, '');
-  const endpointSuffixes = ['/chat/completions', '/messages', '/completions', '/responses'];
-  for (const suffix of endpointSuffixes) {
-    if (normalized.endsWith(suffix)) {
-      normalized = normalized.slice(0, -suffix.length).replace(/\/+$/, '');
-      break;
-    }
+const stripChatCompletionsSuffix = (rawBaseUrl: string): string => {
+  const normalized = rawBaseUrl.trim().replace(/\/+$/, '');
+  if (normalized.endsWith('/chat/completions')) {
+    return normalized.slice(0, -'/chat/completions'.length).replace(/\/+$/, '');
   }
   return normalized;
 };
@@ -366,7 +369,7 @@ const buildProviderSelection = (options: {
     sessionModelId: options.modelId,
     primaryModel: `lobster/${options.modelId}`,
     providerConfig: {
-      baseUrl: stripEndpointSuffix(options.baseURL),
+      baseUrl: stripChatCompletionsSuffix(options.baseURL),
       api: providerApi,
       apiKey: options.apiKey,
       auth: 'api-key',

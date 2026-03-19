@@ -275,6 +275,14 @@ class CoworkService {
       this.notifyOpenClawStatus(result.engineStatus);
     }
 
+    // Show a user-visible error when session start fails
+    if (result.error) {
+      const errorContent = result.code === 'ENGINE_NOT_READY'
+        ? i18nService.t('coworkErrorEngineNotReady')
+        : classifyError(result.error);
+      window.dispatchEvent(new CustomEvent('app:showToast', { detail: errorContent }));
+    }
+
     store.dispatch(setStreaming(false));
     console.error('Failed to start session:', result.error);
     return { session: null, error: result.error };
@@ -315,6 +323,21 @@ class CoworkService {
             },
           }));
         }
+      }
+      // Show a user-visible error message in the session
+      if (result.error) {
+        const errorContent = result.code === 'ENGINE_NOT_READY'
+          ? i18nService.t('coworkErrorEngineNotReady')
+          : classifyError(result.error);
+        store.dispatch(addMessage({
+          sessionId: options.sessionId,
+          message: {
+            id: `error-${Date.now()}`,
+            type: 'system',
+            content: errorContent,
+            timestamp: Date.now(),
+          },
+        }));
       }
       console.error('Failed to continue session:', result.error);
       return false;

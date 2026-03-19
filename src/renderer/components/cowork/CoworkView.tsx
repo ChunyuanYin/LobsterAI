@@ -154,9 +154,10 @@ const CoworkView: React.FC<CoworkViewProps> = ({ onRequestAppSettings, onShowSki
     };
   }, [dispatch]);
 
-  const handleStartSession = async (prompt: string, skillPrompt?: string, imageAttachments?: CoworkImageAttachment[]) => {
+  const handleStartSession = async (prompt: string, skillPrompt?: string, imageAttachments?: CoworkImageAttachment[]): Promise<boolean | void> => {
     if (isOpenClawEngine && openClawStatus && !isOpenClawReadyForSession(openClawStatus)) {
-      return;
+      window.dispatchEvent(new CustomEvent('app:showToast', { detail: i18nService.t('coworkErrorEngineNotReady') }));
+      return false;
     }
     // Prevent duplicate submissions
     if (isStartingRef.current) return;
@@ -289,7 +290,10 @@ const CoworkView: React.FC<CoworkViewProps> = ({ onRequestAppSettings, onShowSki
 
   const handleContinueSession = async (prompt: string, skillPrompt?: string, imageAttachments?: CoworkImageAttachment[]) => {
     if (!currentSession) return;
-    if (isOpenClawEngine && openClawStatus && !isOpenClawReadyForSession(openClawStatus)) return;
+    if (isOpenClawEngine && openClawStatus && !isOpenClawReadyForSession(openClawStatus)) {
+      window.dispatchEvent(new CustomEvent('app:showToast', { detail: i18nService.t('coworkErrorEngineNotReady') }));
+      return false;
+    }
 
     console.log('[CoworkView] handleContinueSession called', {
       hasImageAttachments: !!imageAttachments,

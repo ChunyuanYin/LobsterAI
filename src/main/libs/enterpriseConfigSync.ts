@@ -280,7 +280,7 @@ function syncCoworkConfig(
     }
 
     setConfig(updates);
-    console.log('[Enterprise] synced cowork config');
+    console.log(`[Enterprise] synced cowork config: ${JSON.stringify(updates)}`);
   } catch (error) {
     console.error('[Enterprise] failed to sync cowork config:', error);
   }

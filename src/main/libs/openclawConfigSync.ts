@@ -20,9 +20,13 @@ export type McpBridgeConfig = {
   tools: McpToolManifestEntry[];
 };
 
-const mapExecutionModeToSandboxMode = (_mode: CoworkExecutionMode): 'off' | 'non-main' | 'all' => {
-  // Sandbox mode disabled — always run locally
-  return 'off';
+const mapExecutionModeToSandboxMode = (mode: CoworkExecutionMode): 'off' | 'non-main' | 'all' => {
+  switch (mode) {
+    case 'sandbox': return 'all';
+    case 'auto': return 'non-main';
+    case 'local':
+    default: return 'off';
+  }
 };
 
 /**
@@ -649,6 +653,7 @@ export class OpenClawConfigSync {
       modelName: apiResolution.providerMetadata?.modelName,
     });
     const sandboxMode = mapExecutionModeToSandboxMode(coworkConfig.executionMode || 'auto');
+    console.log(`[OpenClawConfigSync] sandbox mode: ${sandboxMode} (executionMode: ${coworkConfig.executionMode || 'auto'})`);
 
     const workspaceDir = (coworkConfig.workingDirectory || '').trim();
 

@@ -483,6 +483,7 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
   const [isImportingProviders, setIsImportingProviders] = useState(false);
   const [isExportingProviders, setIsExportingProviders] = useState(false);
   const initialThemeRef = useRef<'light' | 'dark' | 'system'>(themeService.getTheme());
+  const initialThemeIdRef = useRef<string>(themeService.getThemeId());
   const initialLanguageRef = useRef<LanguageType>(i18nService.getLanguage());
   const didSaveRef = useRef(false);
 
@@ -903,7 +904,7 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
       if (didSaveRef.current) {
         return;
       }
-      themeService.setTheme(initialThemeRef.current);
+      themeService.restoreTheme(initialThemeIdRef.current, initialThemeRef.current);
       i18nService.setLanguage(initialLanguageRef.current, { persist: false });
     };
   }, []);

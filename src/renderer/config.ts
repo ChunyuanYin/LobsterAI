@@ -1,4 +1,4 @@
-import { ProviderRegistry, ProviderName, ApiFormat } from '@shared/providers';
+import { ProviderRegistry } from '@shared/providers';
 
 // 配置类型定义
 export interface AppConfig {

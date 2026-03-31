@@ -1063,7 +1063,6 @@ const IMSettings: React.FC = () => {
         {platforms.map((platform) => {
                 const logo = PlatformRegistry.logo(platform);
            const isEnabled = isPlatformEnabled(platform);
-          const isConnected = getPlatformConnected(platform) || getPlatformStarting(platform);
           const canToggle = isEnabled || canStart(platform);
           return (
             <div

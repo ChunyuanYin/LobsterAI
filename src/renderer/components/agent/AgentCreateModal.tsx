@@ -107,7 +107,7 @@ const AgentCreateModal: React.FC<AgentCreateModalProps> = ({ isOpen, onClose }) 
 
   const isPlatformConfigured = (platform: IMPlatform): boolean => {
     if (!imConfig) return false;
-    return imConfig[platform]?.enabled === true;
+    return (imConfig as unknown as Record<string, { enabled?: boolean }>)[platform]?.enabled === true;
   };
 
   const tabs: { key: CreateTab; label: string }[] = [

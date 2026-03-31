@@ -130,7 +130,10 @@ const AgentSettingsPanel: React.FC<AgentSettingsPanelProps> = ({ agentId, onClos
 
   const isPlatformConfigured = (platform: Platform): boolean => {
     if (!imConfig) return false;
-    return imConfig[platform]?.enabled === true;
+    if (platform === 'qq' || platform === 'feishu' || platform === 'dingtalk') {
+      return (imConfig[platform] as any)?.instances?.some((i: any) => i.enabled) ?? false;
+    }
+    return (imConfig[platform] as any)?.enabled === true;
   };
 
   const isMainAgent = agentId === 'main';

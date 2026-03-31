@@ -104,6 +104,19 @@ export function parseChannelSessionKey(sessionKey: string): { platform: Platform
     if (parts.length >= 4) {
       let platform = PlatformRegistry.platformOfChannel(parts[2]);
       if (platform) {
+        // Detect per-account-channel-peer format:
+        //   agent:{agentId}:{channel}:{accountId}:{peerKind}:{peerId}
+        // vs per-channel-peer format:
+        //   agent:{agentId}:{channel}:{peerKind}:{peerId}
+        // If parts[3] is a peer kind ('direct','group','channel'), it's per-channel-peer.
+        // Otherwise parts[3] is an accountId — keep it in conversationId so that
+        // different accounts with the same peerId get separate sessions.
+        const peerKinds = new Set(['direct', 'group', 'channel']);
+        if (parts.length >= 6 && !peerKinds.has(parts[3])) {
+          // per-account-channel-peer: include accountId in conversationId for isolation
+          const conversationId = parts.slice(3).join(':');
+          if (conversationId) return { platform, conversationId };
+        }
         const conversationId = parts.slice(3).join(':');
         if (conversationId) return { platform, conversationId };
       }

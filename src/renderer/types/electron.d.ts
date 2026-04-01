@@ -125,6 +125,13 @@ interface AppUpdateDownloadProgress {
   speed: number | undefined;
 }
 
+interface QwenOAuthToken {
+  access: string;
+  refresh: string;
+  expires: number;
+  resourceUrl?: string;
+}
+
 interface WindowState {
   isMaximized: boolean;
   isFullscreen: boolean;
@@ -499,6 +506,11 @@ interface IElectronAPI {
   networkStatus: {
     send: (status: 'online' | 'offline') => void;
   };
+  qwen: {
+    oauthLogin: () => Promise<{ success: boolean; data?: QwenOAuthToken; error?: string }>;
+    oauthRefresh: (refreshToken: string) => Promise<{ success: boolean; data?: QwenOAuthToken; error?: string }>;
+    onOAuthProgress: (callback: (message: string) => void) => () => void;
+  },
   feishu: {
     install: {
       qrcode: (isLark: boolean) => Promise<{

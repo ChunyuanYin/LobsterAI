@@ -1285,6 +1285,18 @@ const stopMcpBridge = async (): Promise<void> => {
  */
 let mcpBridgeRefreshPromise: Promise<{ tools: number; error?: string }> | null = null;
 
+const broadcastMcpBridgeSync = (channel: string, data?: Record<string, unknown>): void => {
+  const windows = BrowserWindow.getAllWindows();
+  windows.forEach((win) => {
+    if (win.isDestroyed()) return;
+    try {
+      win.webContents.send(channel, data ?? {});
+    } catch (error) {
+      console.error(`[McpBridge] Failed to broadcast ${channel}:`, error);
+    }
+  });
+};
+
 const refreshMcpBridge = (): Promise<{ tools: number; error?: string }> => {
   if (mcpBridgeRefreshPromise) {
     return mcpBridgeRefreshPromise;
@@ -1292,6 +1304,7 @@ const refreshMcpBridge = (): Promise<{ tools: number; error?: string }> => {
   mcpBridgeRefreshPromise = (async () => {
     try {
       console.log('[McpBridge] refreshing after config change...');
+      broadcastMcpBridgeSync('mcp:bridge:syncStart');
 
       // 1. Stop existing MCP servers (but keep HTTP callback server alive — port stays the same)
       if (mcpServerManager) {
@@ -1320,7 +1333,14 @@ const refreshMcpBridge = (): Promise<{ tools: number; error?: string }> => {
       console.error('[McpBridge] refresh error:', msg);
       return { tools: 0, error: msg };
     }
-  })().finally(() => {
+  })().then((result) => {
+    broadcastMcpBridgeSync('mcp:bridge:syncDone', { tools: result.tools, error: result.error });
+    return result;
+  }).catch((err) => {
+    const error = err instanceof Error ? err.message : String(err);
+    broadcastMcpBridgeSync('mcp:bridge:syncDone', { tools: 0, error });
+    return { tools: 0, error };
+  }).finally(() => {
     mcpBridgeRefreshPromise = null;
   });
   return mcpBridgeRefreshPromise;

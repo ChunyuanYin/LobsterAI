@@ -16,10 +16,11 @@ export interface ScheduledTaskHandlerDeps {
       getSessionMapping: (conversationId: string, platform: string) => {
         coworkSessionId: string;
       } | undefined;
-      listSessionMappings: (platform: string) => Array<{
+      listSessionMappings: (platform: string, agentId?: string) => Array<{
         imConversationId: string;
         platform: string;
         coworkSessionId: string;
+        agentId: string;
         lastActiveAt: string;
       }>;
     } | undefined;
@@ -220,29 +221,19 @@ export function registerScheduledTaskHandlers(deps: ScheduledTaskHandlerDeps): v
     }
   });
 
-  ipcMain.handle(ScheduledTaskIpc.ListChannelConversations, async (_event, channel: string) => {
+  ipcMain.handle(ScheduledTaskIpc.ListChannelConversations, async (_event, channel: string, accountId?: string) => {
     try {
-      console.log('[IPC][listChannelConversations] channel:', channel);
       const platform = PlatformRegistry.platformOfChannel(channel);
-      console.log('[IPC][listChannelConversations] resolved platform:', platform);
-      if (!platform) {
-        console.log('[IPC][listChannelConversations] no platform mapping, returning empty');
-        return { success: true, conversations: [] };
-      }
+      if (!platform) return { success: true, conversations: [] };
       const imStore = getIMGatewayManager()?.getIMStore();
-      if (!imStore) {
-        console.log('[IPC][listChannelConversations] no imStore available, returning empty');
-        return { success: true, conversations: [] };
-      }
-      const mappings = imStore.listSessionMappings(platform);
-      console.log('[IPC][listChannelConversations] found', mappings.length, 'session mappings for platform:', platform);
+      if (!imStore) return { success: true, conversations: [] };
+      const mappings = imStore.listSessionMappings(platform, accountId);
       const conversations = mappings.map((m) => ({
         conversationId: m.imConversationId,
         platform: m.platform,
         coworkSessionId: m.coworkSessionId,
         lastActiveAt: m.lastActiveAt,
       }));
-      console.log('[IPC][listChannelConversations] conversations:', JSON.stringify(conversations, null, 2));
       return { success: true, conversations };
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : 'Failed to list conversations' };

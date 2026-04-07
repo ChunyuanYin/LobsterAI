@@ -41,8 +41,10 @@ const BRIDGE_MAX_MESSAGE_CHARS = 1200;
 // v2026.4.5 introduced a connect.challenge pre-auth step that can delay the
 // initial handshake when the gateway is busy loading plugins at startup.
 // The GatewayClient auto-reconnects and typically succeeds on the second
-// attempt (~15-20s total), so 30s gives enough headroom.
-const GATEWAY_READY_TIMEOUT_MS = 30_000;
+// attempt.  The model-pricing bootstrap fetches https://openrouter.ai which
+// can timeout (15s) in regions with slow external API access, adding to the
+// overall startup delay.  60s accommodates pricing timeout + plugin loading.
+const GATEWAY_READY_TIMEOUT_MS = 60_000;
 const FINAL_HISTORY_SYNC_LIMIT = 50;
 const CHANNEL_SESSION_DISCOVERY_LIMIT = 200;
 

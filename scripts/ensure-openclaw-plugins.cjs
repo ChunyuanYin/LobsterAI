@@ -354,3 +354,4 @@ if (fs.existsSync(weixinApiPath)) {
     log('WARNING: could not find CHANNEL_VERSION assignment in openclaw-weixin/src/api/api.ts, skipping patch');
   }
 }
+

@@ -141,7 +141,8 @@ if ! pnpm release:check; then
 fi
 
 echo "[2/7] Packing npm tarball"
-npm pack --pack-destination "$PACK_DIR"
+# Skip prepack rebuild — build and ui:build already ran in step [1/7].
+OPENCLAW_PREPACK_PREPARED=1 npm pack --pack-destination "$PACK_DIR"
 TARBALL="$(ls -1t "$PACK_DIR"/openclaw-*.tgz | head -n 1)"
 if [[ -z "$TARBALL" || ! -f "$TARBALL" ]]; then
   echo "Failed to locate packed tarball in $PACK_DIR" >&2

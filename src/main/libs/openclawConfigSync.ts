@@ -1037,37 +1037,11 @@ export class OpenClawConfigSync {
                   const thirdPartyDir = findThirdPartyExtensionsDir();
                   return thirdPartyDir ? { load: { paths: [thirdPartyDir] } } : {};
                 })()),
-                // Deny unused bundled plugins to skip jiti discovery + loading.
-                // Each denied plugin is skipped entirely (no lstat, no jiti eval).
-                deny: [
-                  // --- Unused bundled channels (19) ---
-                  // LobsterAI only uses telegram + discord; feishu/qqbot have
-                  // conditional enabled:false and third-party replacements.
-                  'bluebubbles', 'googlechat', 'imessage', 'irc', 'line',
-                  'matrix', 'mattermost', 'msteams', 'nextcloud-talk',
-                  'nostr', 'qa-channel', 'signal', 'slack', 'synology-chat',
-                  'tlon', 'twitch', 'whatsapp', 'zalo', 'zalouser',
-                  // --- Unused bundled providers (29) ---
-                  // LobsterAI writes full provider config (baseUrl/api/apiKey)
-                  // into openclaw.json — the bundled plugin is not needed for
-                  // custom providers to work.
-                  'alibaba', 'amazon-bedrock', 'amazon-bedrock-mantle',
-                  'anthropic-vertex', 'arcee', 'byteplus', 'chutes',
-                  'cloudflare-ai-gateway', 'comfy', 'copilot-proxy',
-                  'deepgram', 'elevenlabs', 'fireworks', 'groq',
-                  'huggingface', 'kilocode', 'litellm', 'microsoft',
-                  'microsoft-foundry', 'mistral', 'nvidia', 'perplexity',
-                  'together', 'venice', 'vercel-ai-gateway',
-                  'vllm', 'vydra', 'xai',
-                  // --- Unused bundled tools/extensions (22) ---
-                  // These are OpenClaw community integrations; LobsterAI uses
-                  // its own implementations or MCP bridge equivalents.
-                  'brave', 'duckduckgo', 'exa', 'fal', 'firecrawl',
-                  'open-prose', 'opencode', 'opencode-go',
-                  'openshell', 'qa-lab', 'runway', 'searxng', 'sglang',
-                  'synthetic', 'tavily',
-                  'voice-call',
-                ],
+                // Deny list cleared — unused bundled plugins are physically removed
+                // from dist/extensions/ at build time (see prune-openclaw-runtime.cjs).
+                // OpenClaw validates deny IDs against discovered plugins, so denying
+                // a removed plugin causes "Config invalid: plugin not found" errors.
+                deny: [],
                 entries: pluginEntries,
               },
             }
